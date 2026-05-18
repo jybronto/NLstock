@@ -1701,7 +1701,7 @@ function buildShipBalance(pn) {
   let running = stock - reserved;
   return dates.map((d, i) => {
     const qty = shipments[i] || 0;
-    const future = d > today;
+    const future = d >= today;
     if (future && qty > 0) running += qty;
     return { qty, netAvail: future ? running : null };
   });
@@ -1753,7 +1753,7 @@ function buildSZProdBalance(pn) {
   let running = stock - backOrder;
   return dates.map((d, i) => {
     const qty = production[i] || 0;
-    const future = d > today;
+    const future = d >= today;
     if (future && qty > 0) running += qty;
     return { qty, netAvail: future ? running : null };
   });
@@ -1937,7 +1937,7 @@ function addToSpecSZ(pn, qty) {
     const futureShips = [];
     let prevNetAvail = available;
     balance.forEach((b, i) => {
-      if (prodDates[i] > today && b.qty > 0 && b.netAvail !== null) {
+      if (prodDates[i] >= today && b.qty > 0 && b.netAvail !== null) {
         const shipAvail = Math.max(0, b.netAvail) - Math.max(0, prevNetAvail);
         if (shipAvail > 0) futureShips.push({ shipAvail, date: formatDate(prodDates[i]) });
         prevNetAvail = b.netAvail;
@@ -2166,7 +2166,7 @@ function parseImportRowsSZ(rows) {
     const futureShips = [];
     let prevNetAvail = row.available;
     balance.forEach((b, i) => {
-      if (dates[i] > today && b.qty > 0 && b.netAvail !== null) {
+      if (dates[i] >= today && b.qty > 0 && b.netAvail !== null) {
         const shipAvail = Math.max(0, b.netAvail) - Math.max(0, prevNetAvail);
         if (shipAvail > 0) futureShips.push({ shipAvail, date: formatDate(dates[i]) });
         prevNetAvail = b.netAvail;
@@ -2439,7 +2439,7 @@ function filterReservations() {
     for (let i = 0; i < qtys.length; i++) {
       if (qtys[i] > 0) {
         const shipDate = new Date(state.data.shipmentDates[i]);
-        if (shipDate > todayMidnight) { // skip past shipments
+        if (shipDate >= todayMidnight) { // skip past shipments
           shipmentTimeline[normItem].push({ date: shipDate, qty: qtys[i] });
         }
       }
@@ -2776,7 +2776,7 @@ function getETA(pn) {
   const dates = (state.data.shipmentDates || []).map(d => new Date(d));
   const shipments = getShipments(pn);
   for (let i = 0; i < dates.length; i++) {
-    if (dates[i] > today && (shipments[i] || 0) > 0) return formatDate(dates[i]);
+    if (dates[i] >= today && (shipments[i] || 0) > 0) return formatDate(dates[i]);
   }
   return null;
 }
@@ -2800,7 +2800,7 @@ function addToSpec(pn, qty) {
     const futureShips = [];
     let prevNetAvail = available; // running balance before any ships
     balance.forEach((b, i) => {
-      if (shipDates[i] > today && b.qty > 0 && b.netAvail !== null) {
+      if (shipDates[i] >= today && b.qty > 0 && b.netAvail !== null) {
         const shipAvail = Math.max(0, b.netAvail) - Math.max(0, prevNetAvail);
         if (shipAvail > 0) {
           futureShips.push({ shipAvail, date: formatDate(shipDates[i]) });
@@ -3130,7 +3130,7 @@ function parseImportRows(rows) {
     const futureShips = [];
     let prevNetAvail = row.available;
     balance.forEach((b, i) => {
-      if (dates[i] > today && b.qty > 0 && b.netAvail !== null) {
+      if (dates[i] >= today && b.qty > 0 && b.netAvail !== null) {
         const shipAvail = Math.max(0, b.netAvail) - Math.max(0, prevNetAvail);
         if (shipAvail > 0) futureShips.push({ shipAvail, date: formatDate(dates[i]) });
         prevNetAvail = b.netAvail;
@@ -3633,7 +3633,7 @@ async function exportReservationsToExcel() {
     for (let i = 0; i < qtys.length; i++) {
       if (qtys[i] > 0) {
         const d = new Date(state.data.shipmentDates[i]);
-        if (d > todayMidnight) shipmentTimeline[normItem].push({ date: d, qty: qtys[i] });
+        if (d >= todayMidnight) shipmentTimeline[normItem].push({ date: d, qty: qtys[i] });
       }
     }
   }
