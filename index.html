@@ -2355,7 +2355,7 @@ function renderStockTable() {
     const shipments = getShipments(pn);
     const reserved = getTotalReserved(pn);
     const available = stock - reserved;
-    const pending = shipments.reduce((sum, qty, i) => dates[i] > today && qty > 0 ? sum + qty : sum, 0);
+    const pending = shipments.reduce((sum, qty, i) => dates[i] >= today && qty > 0 ? sum + qty : sum, 0);
     const availPlusPending = available + pending;
 
     const stockCls = stock > 0 ? 'stock-positive' : 'stock-zero';
