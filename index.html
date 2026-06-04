@@ -301,6 +301,7 @@
     background: var(--surface2);
   }
   .stock-positive { color: var(--green); }
+  .stock-eta      { color: var(--accent2); }
   .stock-partial  { color: #ffd166; }
   .stock-zero { color: var(--text3); }
   .stock-negative { color: var(--red); }
@@ -491,8 +492,30 @@
   /* ORDER SPECIFICATION BUILDER */
   .lookup-layout {
     display: flex;
-    gap: 20px;
+    gap: 0;
     align-items: stretch;
+  }
+  .lookup-splitter {
+    width: 6px;
+    cursor: col-resize;
+    flex-shrink: 0;
+    background: transparent;
+    border-radius: 3px;
+    transition: background 0.15s;
+    margin: 0 4px;
+    position: relative;
+  }
+  .lookup-splitter::after {
+    content: '';
+    position: absolute;
+    inset: 0 1px;
+    background: var(--border);
+    border-radius: 3px;
+    transition: background 0.15s;
+  }
+  .lookup-splitter:hover::after,
+  .lookup-splitter.dragging::after {
+    background: var(--accent);
   }
   .lookup-left {
     flex: 1 1 0;
@@ -505,10 +528,18 @@
   .lookup-right {
     flex: 1 1 0;
     min-width: 0;
+    position: sticky;
+    top: 20px;
+    height: calc(100vh - 120px);
+    display: flex;
+    flex-direction: column;
   }
   .lookup-right .spec-panel {
-    min-height: 200px;
+    flex: 1 1 0;
+    min-height: 0;
     position: static;
+    display: flex;
+    flex-direction: column;
   }
   .spec-panel {
     background: var(--surface);
@@ -517,6 +548,21 @@
     padding: 18px;
     position: sticky;
     top: 20px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #specContainer, #specSZContainer {
+    flex: 1 1 0;
+    overflow-y: auto;
+    overflow-x: auto;
+    min-height: 0;
+  }
+  #specTable thead th {
+    position: sticky;
+    top: 0;
+    background: var(--surface2);
+    z-index: 2;
   }
   .spec-panel-header {
     display: flex;
@@ -879,7 +925,7 @@
     <div class="header-logo">NL</div>
     <div>
       <div class="header-title">Warehouse Intelligence</div>
-      <div class="header-subtitle">NL Stock & Shipment Analytics <span style="opacity:0.45;margin-left:6px">v1.0</span></div>
+      <div class="header-subtitle">NL Stock & Shipment Analytics <span style="opacity:0.45;margin-left:6px">v1.1</span></div>
     </div>
   </div>
   <div class="header-meta">
@@ -991,8 +1037,8 @@
 
   <!-- ITEM LOOKUP NL TAB -->
   <div id="tab-item-lookup" style="display:none">
-    <div class="lookup-layout">
-      <div class="lookup-left">
+    <div class="lookup-layout" id="lookupLayoutNL">
+      <div class="lookup-left" id="lookupLeftNL">
         <div class="lookup-card">
           <div class="lookup-header">
             <div class="report-title">Item Lookup NL</div>
@@ -1005,13 +1051,22 @@
           <div id="lookupResult"></div>
         </div>
       </div>
-      <div class="lookup-right">
+      <div class="lookup-splitter" id="splitterNL"></div>
+      <div class="lookup-right" id="lookupRightNL">
         <div class="spec-panel">
           <div class="spec-panel-header">
-            <div style="display:flex;align-items:center;gap:12px">
-              <div class="report-title" style="font-size:16px">Order Specification</div>
-              <button class="spec-export-btn" style="width:80px" onclick="specOrder=[];renderSpec()">Clear</button>
-              <button class="spec-export-btn" style="width:100px" onclick="addEmptySpecRow()">＋ Add Row</button>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:12px">
+                <div class="report-title" style="font-size:16px">Order Specification</div>
+                <button class="spec-export-btn" style="width:80px" onclick="specOrder=[];renderSpec()">Clear</button>
+                <button class="spec-export-btn" style="width:100px" onclick="addEmptySpecRow()">＋ Add Row</button>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:13px;color:var(--text3);white-space:nowrap">Customer:</span>
+                <select class="filter-select" id="specAccountFilter" style="width:240px;min-width:160px" onchange="onSpecAccountChange()">
+                  <option value="">— select customer —</option>
+                </select>
+              </div>
             </div>
             <div style="display:flex;gap:8px;align-items:center">
               <button class="spec-export-btn" style="width:110px" onclick="openPasteModal(false)">📋 Paste</button>
@@ -1688,16 +1743,84 @@ function getTotalReserved(pn) {
   return total;
 }
 
+// Returns total reserved for pn by all accounts EXCEPT the given account (for spec analysis)
+function getTotalReservedExcluding(pn, excludeAccount) {
+  if (!excludeAccount) return getTotalReserved(pn);
+  const allKeys = getAllNormsForAnyPN(pn);
+  let total = 0;
+  for (const res of (state.data.reservations || [])) {
+    if (res.customer === excludeAccount) continue;
+    for (const [k, v] of Object.entries(res.items || {})) {
+      if (allKeys.includes(normalizeItemName(k))) {
+        total += Number(v) || 0;
+        break;
+      }
+    }
+  }
+  return total;
+}
+
+// Returns how much current stock is available FOR the given account,
+// using the same sequential allocation order as the Reservations tab (sorted by date,
+// preserving file order for ties). Walks through reservation rows and returns
+// remaining stock at the moment we reach this account's first entry for the item.
+function getStockAvailableForAccount(pn, account) {
+  if (!account) return Math.max(0, getStock(pn) - getTotalReserved(pn));
+  const allKeys = getAllNormsForAnyPN(pn);
+  const stock   = getStock(pn);
+
+  // All reservation rows that contain this item, in the same order the Reservations tab uses
+  const allRes = (state.data.reservations || [])
+    .filter(r => Object.keys(r.items || {}).some(k => allKeys.includes(normalizeItemName(k))))
+    .sort((a, b) => new Date(a.date) - new Date(b.date)); // stable: preserves file order on tie
+
+  // Walk the queue and stop at the first row belonging to this account
+  let remaining = stock;
+  for (const res of allRes) {
+    if (res.customer === account) {
+      // This account's turn — return what's still available
+      return Math.max(0, remaining);
+    }
+    // Subtract this earlier customer's reservation for this item
+    for (const [k, v] of Object.entries(res.items || {})) {
+      if (allKeys.includes(normalizeItemName(k))) {
+        remaining -= Number(v) || 0;
+        break;
+      }
+    }
+  }
+  // Account not found in reservations for this item — return true free stock
+  return Math.max(0, stock - getTotalReserved(pn));
+}
+
+// Returns total reserved for pn by the given account only
+function getAccountReserved(pn, account) {
+  if (!account) return 0;
+  const allKeys = getAllNormsForAnyPN(pn);
+  let total = 0;
+  for (const res of (state.data.reservations || [])) {
+    if (res.customer !== account) continue;
+    for (const [k, v] of Object.entries(res.items || {})) {
+      if (allKeys.includes(normalizeItemName(k))) {
+        total += Number(v) || 0;
+        break;
+      }
+    }
+  }
+  return total;
+}
+
 // Returns per-shipment-slot running balance (net available after each ship arrives).
 // balances[i] = { qty, netAvail } where netAvail is cumulative stock-reserved+ships up to slot i.
 // Past ships (date <= today) are skipped — their goods are already in stock.
-function buildShipBalance(pn) {
+// excludeAccount: if provided, reservations from that account are NOT subtracted (used for spec analysis)
+function buildShipBalance(pn, excludeAccount) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const dates    = (state.data.shipmentDates || []).map(d => new Date(d));
   const shipments = getShipments(pn);
   const stock    = getStock(pn);
-  const reserved = getTotalReserved(pn);
+  const reserved = excludeAccount ? getTotalReservedExcluding(pn, excludeAccount) : getTotalReserved(pn);
   let running = stock - reserved;
   return dates.map((d, i) => {
     const qty = shipments[i] || 0;
@@ -2782,35 +2905,87 @@ function getETA(pn) {
   return null;
 }
 
+function getSpecAccount() {
+  const sel = document.getElementById('specAccountFilter');
+  return sel ? sel.value : '';
+}
+
+function computeSpecAvailability(pn) {
+  const account = getSpecAccount();
+  const stock = getStock(pn);
+  const totalReserved = getTotalReserved(pn);
+
+  // Queue-aware available: how much of current stock belongs to this customer.
+  // No customer — use stock minus all reservations (true free stock).
+  const available = account ? getStockAvailableForAccount(pn, account) : stock - totalReserved;
+
+  // trueAvail = stock minus ALL reservations — shown as "Avail", matches Item Lookup
+  const trueAvailRaw = stock - totalReserved; // may be negative
+  const trueAvail = Math.max(0, trueAvailRaw);
+
+  // ETA uses GLOBAL balance (no account exclusion) so it matches the Item Lookup panel.
+  // Baseline is trueAvailRaw (can be negative), shipments fill the deficit.
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const shipDates = (state.data.shipmentDates || []).map(d => new Date(d));
+  const globalBalance = buildShipBalance(pn, null);
+  const futureShips = [];
+  let prevNetAvail = trueAvailRaw;
+  globalBalance.forEach((b, i) => {
+    if (shipDates[i] >= today && b.qty > 0 && b.netAvail !== null) {
+      const shipAvail = Math.max(0, b.netAvail) - Math.max(0, prevNetAvail);
+      if (shipAvail > 0) futureShips.push({ shipAvail, date: formatDate(shipDates[i]) });
+      prevNetAvail = b.netAvail;
+    }
+  });
+  const totalAvail = (available > 0 ? available : 0) + futureShips.reduce((s, f) => s + f.shipAvail, 0);
+  const accountReserved = account ? getAccountReserved(pn, account) : 0;
+  let accountReservedStatus = null;
+  let accountReservedBreakdown = []; // [{qty, date, dateStr}] — ETA ships covering this reservation
+  if (account && accountReserved > 0) {
+    if (available >= accountReserved) {
+      accountReservedStatus = 'stock';
+    } else if (totalAvail >= accountReserved) {
+      accountReservedStatus = 'eta';
+    } else {
+      accountReservedStatus = 'short';
+    }
+    // Compute per-ship breakdown for the ETA/Short portion
+    const stockCovered = Math.min(Math.max(0, available), accountReserved);
+    const remaining = accountReserved - stockCovered;
+    if (remaining > 0) {
+      let debtRemaining = Math.max(0, -available); // units owed to earlier reservations
+      let qtyRemaining = remaining;
+      const shipDates = (state.data.shipmentDates || []).map(d => new Date(d));
+      const shipQtys = getShipments(pn);
+      const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
+      for (let j = 0; j < shipDates.length && qtyRemaining > 0; j++) {
+        if (shipDates[j] < todayMid) continue;
+        const sq = shipQtys[j] || 0;
+        if (sq <= 0) continue;
+        const debtFromShip = Math.min(debtRemaining, sq);
+        debtRemaining -= debtFromShip;
+        const forCurrent = Math.min(sq - debtFromShip, qtyRemaining);
+        qtyRemaining -= forCurrent;
+        if (forCurrent > 0) {
+          const dStr = shipDates[j].toISOString().slice(0, 10);
+          const last = accountReservedBreakdown[accountReservedBreakdown.length - 1];
+          if (last && last.dateStr === dStr) last.qty += forCurrent;
+          else accountReservedBreakdown.push({ qty: forCurrent, date: formatDate(shipDates[j]), dateStr: dStr });
+        }
+      }
+    }
+  }
+  return { available, totalAvail, trueAvail, futureShips, accountReserved, accountReservedStatus, accountReservedBreakdown };
+}
+
 function addToSpec(pn, qty) {
   qty = Math.max(1, parseInt(qty) || 1);
   const existing = specOrder.findIndex(r => normalizeItemName(r.pn) === normalizeItemName(pn));
   if (existing >= 0) {
     specOrder[existing].qty += qty;
   } else {
-    const stock = getStock(pn);
-    const reserved = getTotalReserved(pn);
-    const available = stock - reserved;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const shipDates = (state.data.shipmentDates || []).map(d => new Date(d));
-    // Use buildShipBalance which accounts for reservations against ships
-    const balance = buildShipBalance(pn);
-    // For each future ship compute actual available units from that ship:
-    // = max(0, netAvail) - max(0, prevNetAvail)
-    const futureShips = [];
-    let prevNetAvail = available; // running balance before any ships
-    balance.forEach((b, i) => {
-      if (shipDates[i] >= today && b.qty > 0 && b.netAvail !== null) {
-        const shipAvail = Math.max(0, b.netAvail) - Math.max(0, prevNetAvail);
-        if (shipAvail > 0) {
-          futureShips.push({ shipAvail, date: formatDate(shipDates[i]) });
-        }
-        prevNetAvail = b.netAvail;
-      }
-    });
-    const totalAvail = (available > 0 ? available : 0) + futureShips.reduce((s, f) => s + f.shipAvail, 0);
-    specOrder.push({ pn, qty, available, totalAvail, futureShips });
+    const { available, totalAvail, trueAvail, futureShips, accountReserved, accountReservedStatus, accountReservedBreakdown } = computeSpecAvailability(pn);
+    specOrder.push({ pn, qty, available, totalAvail, trueAvail, futureShips, accountReserved, accountReservedStatus, accountReservedBreakdown });
   }
   renderSpec();
 }
@@ -2849,23 +3024,8 @@ function addEmptySpecRow() {
 function updateSpecPn(idx, newPn) {
   if (!newPn || newPn === specOrder[idx].pn) return;
   const qty = specOrder[idx].qty;
-  const stock = getStock(newPn);
-  const reserved = getTotalReserved(newPn);
-  const available = stock - reserved;
-  const today = new Date(); today.setHours(0,0,0,0);
-  const shipDates = (state.data.shipmentDates || []).map(d => new Date(d));
-  const balance = buildShipBalance(newPn);
-  const futureShips = [];
-  let prevNetAvail = available;
-  balance.forEach((b, i) => {
-    if (shipDates[i] > today && b.qty > 0 && b.netAvail !== null) {
-      const shipAvail = Math.max(0, b.netAvail) - Math.max(0, prevNetAvail);
-      if (shipAvail > 0) futureShips.push({ shipAvail, date: formatDate(shipDates[i]) });
-      prevNetAvail = b.netAvail;
-    }
-  });
-  const totalAvail = (available > 0 ? available : 0) + futureShips.reduce((s, f) => s + f.shipAvail, 0);
-  specOrder[idx] = { pn: newPn, qty, available, totalAvail, futureShips };
+  const { available, totalAvail, trueAvail, futureShips, accountReserved, accountReservedStatus, accountReservedBreakdown } = computeSpecAvailability(newPn);
+  specOrder[idx] = { pn: newPn, qty, available, totalAvail, trueAvail, futureShips, accountReserved, accountReservedStatus, accountReservedBreakdown };
   renderSpec();
 }
 
@@ -2913,18 +3073,62 @@ function renderSpec() {
   html += '<th style="width:10px"></th>';
   html += '</tr></thead><tbody>';
   specOrder.forEach((row, i) => {
-    const isPartial = row.available > 0 && row.qty > 0 && row.available < row.qty;
-    const isAvail = row.available > 0 && row.qty > 0 && row.available >= row.qty;
-    const statusCls = isAvail ? 'stock-positive' : isPartial ? 'stock-partial' : 'stock-negative';
-    const statusText = isAvail ? 'Available' : isPartial ? 'Partial' : 'No Stock';
+    const qty       = row.qty || 0;
+    const avail     = row.available || 0;
+    const isAvail   = qty > 0 && avail >= qty;
+    const isPartial = qty > 0 && avail > 0 && avail < qty;
+    const statusCls  = isAvail ? 'stock-positive' : isPartial ? 'stock-partial' : 'stock-negative';
+    const statusText = isAvail ? 'Available'      : isPartial ? 'Partial'       : 'No Stock';
 
-    // Build info: full stock + all future shipments
+    // Build info
     const _mono = 'font-size:13px;font-family:var(--mono)';
+    const hasCustomer = !!getSpecAccount();
     let infoParts = [], infoTitleParts = [];
-    if ((row.available || 0) > 0) {
-      infoParts.push(`<span style="${_mono};color:var(--text3)">Stock: </span><span style="${_mono};color:var(--green)">${row.available}</span>`);
-      infoTitleParts.push(`Stock: ${row.available}`);
+
+    const stockAvail  = row.available || 0;  // queue-aware (for status/reservation calc)
+    const trueAvail   = row.trueAvail  || 0;  // stock − all reservations (shown as Avail)
+    const reserved    = row.accountReserved || 0;
+    const etaTotal    = (row.futureShips || []).reduce((s, f) => s + f.shipAvail, 0);
+
+    if (hasCustomer && reserved > 0) {
+      const stockCovered = Math.min(stockAvail, reserved);
+      const breakdown    = row.accountReservedBreakdown || [];
+      const bdTotal      = breakdown.reduce((s, b) => s + b.qty, 0);
+      const short        = reserved - stockCovered - bdTotal;
+
+      let resHtml, resTitle;
+      if (stockCovered === reserved) {
+        resHtml  = `<span style="${_mono};color:var(--text3)">Reserved: </span><span style="${_mono};color:var(--green)">${reserved} - OK</span>`;
+        resTitle = `Reserved: ${reserved} - OK`;
+      } else {
+        let breakHtml = '', breakTitle = '';
+        if (stockCovered > 0) {
+          breakHtml  += `<span style="${_mono};color:var(--green)">${stockCovered} - OK</span>`;
+          breakTitle += `${stockCovered} - OK`;
+        }
+        for (const b of breakdown) {
+          const sep = breakTitle ? ', ' : '';
+          breakHtml  += `<span style="${_mono};color:var(--text3)">${sep}</span><span style="${_mono};color:#f59e0b">${b.qty}</span><span style="${_mono};color:var(--text3)"> ETA ${b.date}</span>`;
+          breakTitle += `${sep}${b.qty} ETA ${b.date}`;
+        }
+        if (short > 0) {
+          const sep = breakTitle ? ', ' : '';
+          breakHtml  += `<span style="${_mono};color:var(--text3)">${sep}</span><span style="${_mono};color:var(--red)">${short} - Short</span>`;
+          breakTitle += `${sep}${short} - Short`;
+        }
+        resHtml  = `<span style="${_mono};color:var(--text3)">Reserved: </span><span style="${_mono};color:#f59e0b">${reserved}</span><span style="${_mono};color:var(--text3)"> (</span>${breakHtml}<span style="${_mono};color:var(--text3)">)</span>`;
+        resTitle = `Reserved: ${reserved} (${breakTitle})`;
+      }
+      infoParts.push(resHtml);
+      infoTitleParts.push(resTitle);
     }
+
+    // Avail = stock minus ALL reservations (true free shelf stock)
+    const availColor = trueAvail > 0 ? 'var(--green)' : 'var(--text3)';
+    infoParts.push(`<span style="${_mono};color:var(--text3)">Avail: </span><span style="${_mono};color:${availColor}">${trueAvail}</span>`);
+    infoTitleParts.push(`Avail: ${trueAvail}`);
+
+    // Future shipments (always)
     const etaEntries = [];
     for (const f of (row.futureShips || [])) {
       etaEntries.push(`<span style="${_mono};color:var(--accent2)">${f.shipAvail}</span><span style="${_mono};color:var(--text3)">×${f.date}</span>`);
@@ -3045,22 +3249,81 @@ async function exportSpecToExcel() {
   });
   headerRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
   headerRow.height = 18;
+  const exportAccount = getSpecAccount();
+  // Color helpers (ARGB for ExcelJS)
+  const xGreen  = { argb: 'FF34C77B' };
+  const xAmber  = { argb: 'FFF59E0B' };
+  const xRed    = { argb: 'FFEF4444' };
+  const xBlue   = { argb: 'FF60A5FA' };
+  const xGray   = { argb: 'FF8899AA' };
+  const fLabel  = clr => ({ color: clr, size: 10 });
+  const fValue  = clr => ({ color: clr, size: 10, bold: true });
+  const nl      = { text: '\n', font: { size: 10 } };
+
   for (const row of specOrder) {
-    const isPartial = row.available > 0 && row.qty > 0 && row.available < row.qty;
-    const isAvail = row.available >= row.qty && row.qty > 0;
-    const status = isAvail ? 'Available' : isPartial ? 'Partial' : 'No Stock';
-    // Build info text: "X now" + each ship "qty x ETAdate"
-    const infoParts = [];
-    if (row.available > 0) infoParts.push(`${row.available} now`);
-    (row.futureShips || []).forEach(f => infoParts.push(`${f.shipAvail} x ETA ${f.date}`));
-    const info = infoParts.join('\n') || '—';
-    const r = ws.addRow([row.pn, row.qty, status, info]);
-    r.height = infoParts.length > 1 ? 12 * infoParts.length : 14;
-    r.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
+    const xqty       = row.qty || 0;
+    const xAvail     = row.available || 0;
+    const xIsAvail   = xqty > 0 && xAvail >= xqty;
+    const xIsPartial = xqty > 0 && xAvail > 0 && xAvail < xqty;
+    const isAvail    = xIsAvail;
+    const status     = xIsAvail ? 'Available' : xIsPartial ? 'Partial' : 'No Stock';
+
+    // Build richText segments
+    const rt = [];
+    let lineCount = 0;
+    const xStockAvail = row.available  || 0;  // queue-aware
+    const xTrueAvail  = row.trueAvail  || 0;  // stock − all reservations
+    const xReserved   = row.accountReserved || 0;
+    const xEtaTotal   = (row.futureShips || []).reduce((s, f) => s + f.shipAvail, 0);
+
+    if (exportAccount && xReserved > 0) {
+      const stockCovered = Math.min(xStockAvail, xReserved);
+      const xBreakdown   = row.accountReservedBreakdown || [];
+      const bdTotal      = xBreakdown.reduce((s, b) => s + b.qty, 0);
+      const short        = xReserved - stockCovered - bdTotal;
+
+      rt.push({ text: 'Reserved: ', font: fLabel(xGray) });
+      if (stockCovered === xReserved) {
+        rt.push({ text: `${xReserved} - OK`, font: fValue(xGreen) });
+      } else {
+        rt.push({ text: `${xReserved} (`, font: fValue(xAmber) });
+        let first = true;
+        if (stockCovered > 0) { rt.push({ text: `${stockCovered} - OK`, font: fValue(xGreen) }); first = false; }
+        for (const b of xBreakdown) {
+          rt.push({ text: `${first ? '' : ', '}${b.qty} ETA ${b.date}`, font: fValue(xAmber) });
+          first = false;
+        }
+        if (short > 0) { rt.push({ text: `${first ? '' : ', '}${short} - Short`, font: fValue(xRed) }); }
+        rt.push({ text: ')', font: fValue(xAmber) });
+      }
+      rt.push(nl); lineCount++;
+    }
+
+    // Avail = stock minus ALL reservations
+    rt.push({ text: 'Avail: ', font: fLabel(xGray) });
+    rt.push({ text: `${xTrueAvail}`, font: fValue(xTrueAvail > 0 ? xGreen : xGray) });
+    rt.push(nl); lineCount++;
+
+    // ETA shipments
+    (row.futureShips || []).forEach(f => {
+      rt.push({ text: 'ETA: ', font: fLabel(xGray) });
+      rt.push({ text: `${f.shipAvail}`, font: fValue(xBlue) });
+      rt.push({ text: `×${f.date}`, font: fLabel(xGray) });
+      rt.push(nl); lineCount++;
+    });
+
+    // Remove trailing newline
+    if (rt.length && rt[rt.length - 1] === nl) rt.pop();
+    if (rt.length === 0) rt.push({ text: '—', font: fLabel(xGray) });
+
+    const r = ws.addRow([row.pn, row.qty, status, '']);
+    r.height = Math.max(14, 14 * lineCount);
+    r.getCell(1).alignment = { horizontal: 'left',   vertical: 'middle' };
     r.getCell(2).alignment = { horizontal: 'center', vertical: 'middle' };
     r.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' };
-    r.getCell(3).font = { bold: true, color: { argb: isAvail ? 'FF34C77B' : isPartial ? 'FFFFD166' : 'FFEF4444' } };
-    r.getCell(4).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    r.getCell(3).font = { bold: true, color: { argb: xIsAvail ? 'FF34C77B' : xIsPartial ? 'FFFFD166' : 'FFEF4444' } };
+    r.getCell(4).value = { richText: rt };
+    r.getCell(4).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
   }
   const buffer = await wb.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -3123,22 +3386,15 @@ function parseImportRows(rows) {
   }
   // Recompute availability for all imported items
   specOrder.forEach(row => {
-    const balance = buildShipBalance(row.pn);
-    const today = new Date(); today.setHours(0,0,0,0);
-    const dates = (state.data.shipmentDates || []).map(d => new Date(d));
-    const stock = getStock(row.pn);
-    const reserved = getTotalReserved(row.pn);
-    row.available = stock - reserved;
-    const futureShips = [];
-    let prevNetAvail = row.available;
-    balance.forEach((b, i) => {
-      if (dates[i] >= today && b.qty > 0 && b.netAvail !== null) {
-        const shipAvail = Math.max(0, b.netAvail) - Math.max(0, prevNetAvail);
-        if (shipAvail > 0) futureShips.push({ shipAvail, date: formatDate(dates[i]) });
-        prevNetAvail = b.netAvail;
-      }
-    });
+    if (!row.pn) return;
+    const { available, totalAvail, trueAvail, futureShips, accountReserved, accountReservedStatus, accountReservedBreakdown } = computeSpecAvailability(row.pn);
+    row.available = available;
+    row.totalAvail = totalAvail;
+    row.trueAvail = trueAvail;
     row.futureShips = futureShips;
+    row.accountReserved = accountReserved;
+    row.accountReservedStatus = accountReservedStatus;
+    row.accountReservedBreakdown = accountReservedBreakdown;
   });
   renderSpec();
 }
@@ -3232,15 +3488,21 @@ function lookupItem() {
     // Shipments
     if (hasShipments) {
       html += `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:7px;">`;
-      const pillDateCount = {};
-      dates.forEach(d => { const k = d.toISOString().slice(0,10); pillDateCount[k] = (pillDateCount[k]||0)+1; });
+      const shipBal = buildShipBalance(pn);
       for (let i = 0; i < dates.length; i++) {
-        const qty = shipments[i] || 0;
+        const { qty, netAvail } = shipBal[i];
         if (qty > 0) {
-          const copyText = `${qty}×${formatDate(dates[i])}`;
+          const showAvail = netAvail !== null && netAvail < qty;
+          const availCls = netAvail > 0 ? 'var(--green)' : 'var(--red)';
+          const suffix = showAvail
+            ? `<span style="font-family:var(--mono);font-size:11px;opacity:0.8;color:${availCls};margin-left:2px">(${netAvail})</span>`
+            : '';
+          const copyQty = showAvail ? netAvail : qty;
+          const copyText = `${copyQty}×${formatDate(dates[i])}`;
           html += `<div data-copy="${copyText.replace(/"/g, '&quot;')}" style="display:flex;align-items:center;gap:2px;background:var(--surface3,var(--surface));border:1px solid var(--border);border-radius:5px;padding:2px 8px;font-size:15px;cursor:pointer;">
             <span style="font-family:var(--mono);font-weight:600;color:var(--accent)">${qty}</span>
             <span style="color:var(--text3)">×${formatDate(dates[i])}</span>
+            ${suffix}
           </div>`;
         }
       }
@@ -3929,10 +4191,35 @@ function updateLastUpdatedUI() {
 // ============================================================
 // RENDER ALL
 // ============================================================
+function populateSpecAccountFilter() {
+  const sel = document.getElementById('specAccountFilter');
+  if (!sel) return;
+  const customers = [...new Set((state.data.reservations || []).map(r => r.customer).filter(Boolean))].sort();
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— select customer —</option>' + customers.map(c => `<option value="${c}"${c === cur ? ' selected' : ''}>${c}</option>`).join('');
+}
+
+function onSpecAccountChange() {
+  // Recompute all spec rows with the new account
+  specOrder.forEach(row => {
+    if (!row.pn) return;
+    const { available, totalAvail, trueAvail, futureShips, accountReserved, accountReservedStatus, accountReservedBreakdown } = computeSpecAvailability(row.pn);
+    row.available = available;
+    row.totalAvail = totalAvail;
+    row.trueAvail = trueAvail;
+    row.futureShips = futureShips;
+    row.accountReserved = accountReserved;
+    row.accountReservedStatus = accountReservedStatus;
+    row.accountReservedBreakdown = accountReservedBreakdown;
+  });
+  renderSpec();
+}
+
 function renderAll() {
   renderStockTable();
   renderReservationsTable();
   renderPartNumbers();
+  populateSpecAccountFilter();
 }
 
 // ============================================================
@@ -4024,6 +4311,52 @@ init();
     tip.style.top = y + 'px';
   }
 })();
+
+// ============================================================
+// RESIZABLE SPLITTER
+// ============================================================
+function initSplitter(splitterId, leftId, rightId) {
+  const splitter = document.getElementById(splitterId);
+  const left     = document.getElementById(leftId);
+  const right    = document.getElementById(rightId);
+  if (!splitter || !left || !right) return;
+
+  let dragging = false, startX = 0, startLeftW = 0, startRightW = 0;
+
+  splitter.addEventListener('mousedown', e => {
+    e.preventDefault();
+    dragging = true;
+    startX      = e.clientX;
+    startLeftW  = left.getBoundingClientRect().width;
+    startRightW = right.getBoundingClientRect().width;
+    splitter.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const dx    = e.clientX - startX;
+    const total = startLeftW + startRightW;
+    const newLeft  = Math.max(200, Math.min(total - 200, startLeftW + dx));
+    const newRight = total - newLeft;
+    left.style.flex  = `0 0 ${newLeft}px`;
+    right.style.flex = `0 0 ${newRight}px`;
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    splitter.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+}
+
+// Init splitters after DOM ready
+document.addEventListener('DOMContentLoaded', () => {
+  initSplitter('splitterNL', 'lookupLeftNL', 'lookupRightNL');
+});
 </script>
 </body>
 </html>
