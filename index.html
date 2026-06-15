@@ -1793,6 +1793,25 @@ function getStockAvailableForAccount(pn, account) {
   return Math.max(0, stock - getTotalReserved(pn));
 }
 
+// Same as getStockAvailableForAccount but returns the raw (possibly negative) remaining
+// so callers can compute the true prior-customer debt for ETA allocation.
+function getRawStockForAccount(pn, account) {
+  if (!account) return getStock(pn) - getTotalReserved(pn);
+  const allKeys = getAllNormsForAnyPN(pn);
+  const stock   = getStock(pn);
+  const allRes = (state.data.reservations || [])
+    .filter(r => Object.keys(r.items || {}).some(k => allKeys.includes(normalizeItemName(k))))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+  let remaining = stock;
+  for (const res of allRes) {
+    if (res.customer === account) return remaining; // raw, may be negative
+    for (const [k, v] of Object.entries(res.items || {})) {
+      if (allKeys.includes(normalizeItemName(k))) { remaining -= Number(v) || 0; break; }
+    }
+  }
+  return stock - getTotalReserved(pn);
+}
+
 // Returns total reserved for pn by the given account only
 function getAccountReserved(pn, account) {
   if (!account) return 0;
@@ -2957,7 +2976,11 @@ function computeSpecAvailability(pn) {
     const stockCovered = Math.min(Math.max(0, available), accountReserved);
     const remaining = accountReserved - stockCovered;
     if (remaining > 0) {
-      let debtRemaining = Math.max(0, -available); // units owed to earlier reservations
+      // Use raw (unclipped) stock position to correctly account for prior-customer debt.
+      // getStockAvailableForAccount clips to 0, so when prior reservations exceed stock
+      // the deficit is lost — getRawStockForAccount preserves it.
+      const rawAvail = account ? getRawStockForAccount(pn, account) : (stock - totalReserved);
+      let debtRemaining = Math.max(0, -rawAvail); // units owed to earlier reservations before this account
       let qtyRemaining = remaining;
       const shipDates = (state.data.shipmentDates || []).map(d => new Date(d));
       const shipQtys = getShipments(pn);
