@@ -925,7 +925,7 @@
     <div class="header-logo">NL</div>
     <div>
       <div class="header-title">Warehouse Intelligence</div>
-      <div class="header-subtitle">NL Stock & Shipment Analytics <span style="opacity:0.45;margin-left:6px">v1.6</span></div>
+      <div class="header-subtitle">NL Stock & Shipment Analytics <span style="opacity:0.45;margin-left:6px">v1.7</span></div>
     </div>
   </div>
   <div class="header-meta">
@@ -2233,7 +2233,7 @@ function renderSpecSZ() {
 async function exportSpecToExcelSZ() {
   if (specOrderSZ.length === 0) return;
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('Order Specification SZ');
+  const ws = wb.addWorksheet('Order Specification SZ', { views: [{ zoomScale: 130 }] });
   ws.columns = [{ width: 24 }, { width: 10 }, { width: 16 }, { width: 40 }];
   const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E2A3A' } };
   const headerFont = { name: 'Aptos', bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
@@ -3263,7 +3263,7 @@ function openPasteModal(isSZ) {
 async function exportSpecToExcel() {
   if (specOrder.length === 0) return;
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('Order Specification');
+  const ws = wb.addWorksheet('Order Specification', { views: [{ zoomScale: 130 }] });
   ws.columns = [{ width: 24 }, { width: 10 }, { width: 16 }, { width: 40 }];
   const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E2A3A' } };
   const headerFont = { name: 'Aptos', bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
@@ -4041,7 +4041,7 @@ async function exportReservationsToExcel() {
 
   // ── Build Excel ──
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('Reservations');
+  const ws = wb.addWorksheet('Reservations', { views: [{ zoomScale: 130 }] });
   ws.columns = [
     { width: 12 }, // Date
     { width: 28 }, // Customer
@@ -4103,7 +4103,7 @@ async function exportStockToExcel() {
   const pns   = state.data.partNumbers.filter(pn => pn && String(pn).trim());
 
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('Stock Report');
+  const ws = wb.addWorksheet('Stock Report', { views: [{ zoomScale: 130 }] });
 
   // ── Column definitions ──
   ws.columns = [
