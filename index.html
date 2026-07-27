@@ -925,7 +925,7 @@
     <div class="header-logo">NL</div>
     <div>
       <div class="header-title">Warehouse Intelligence</div>
-      <div class="header-subtitle">NL Stock & Shipment Analytics <span style="opacity:0.45;margin-left:6px">v1.7</span></div>
+      <div class="header-subtitle">NL Stock & Shipment Analytics <span style="opacity:0.45;margin-left:6px">v1.8</span></div>
     </div>
   </div>
   <div class="header-meta">
@@ -1373,9 +1373,9 @@ function formatDate(d) {
   if (!d) return '';
   const dt = d instanceof Date ? d : new Date(d);
   if (isNaN(dt)) return '';
-  const day = String(dt.getDate()).padStart(2,'0');
-  const month = String(dt.getMonth()+1).padStart(2,'0');
-  const year = String(dt.getFullYear()).slice(-2);
+  const day = String(dt.getUTCDate()).padStart(2,'0');
+  const month = String(dt.getUTCMonth()+1).padStart(2,'0');
+  const year = String(dt.getUTCFullYear()).slice(-2);
   return `${day}.${month}.${year}`;
 }
 
@@ -1438,8 +1438,15 @@ async function parseDailyReport(file) {
     }
   }
   
-  // Get ETA warehouse dates from row 4 (index 4)
-  const dateRow = data[4] || [];
+  // Find "ETA warehouse date" row by label (row index varies between file versions)
+  let dateRow = [];
+  for (let ri = 0; ri < Math.min(12, data.length); ri++) {
+    const row = data[ri] || [];
+    if (row.some(v => v && String(v).toLowerCase().replace(/\s+/g,' ').includes('eta warehouse'))) {
+      dateRow = row;
+      break;
+    }
+  }
   let shipmentDates = [];
   let shipmentColIndices = [];
   
