@@ -925,7 +925,7 @@
     <div class="header-logo">NL</div>
     <div>
       <div class="header-title">Warehouse Intelligence</div>
-      <div class="header-subtitle">NL Stock & Shipment Analytics <span style="opacity:0.45;margin-left:6px">v1.8</span></div>
+      <div class="header-subtitle">NL Stock & Shipment Analytics <span style="opacity:0.45;margin-left:6px">v1.9</span></div>
     </div>
   </div>
   <div class="header-meta">
@@ -1484,7 +1484,10 @@ async function parseDailyReport(file) {
       const val = row[j];
       if (!val) continue;
       const v = String(val).toLowerCase().replace(/[\r\n]+/g, ' ').trim();
-      if (v.includes('units in china') && szStockColIdx < 0) szStockColIdx = j;
+      // Match the real "Units in China" stock column (row 3, col C), NOT the
+      // "Units in GS bonded warehouse (QTY already included in Units in China)"
+      // note cell in row 2, which also contains the substring "Units in China".
+      if (v.includes('units in china') && !v.includes('bonded') && szStockColIdx < 0) szStockColIdx = j;
       if (v.includes('exp') && v.includes('back') && szBackOrderColIdx < 0) szBackOrderColIdx = j;
       if (v.includes('availability') && v.includes('schedule') && szAvailSchedColIdx < 0) szAvailSchedColIdx = j;
     }
