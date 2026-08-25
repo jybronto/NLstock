@@ -925,7 +925,7 @@
     <div class="header-logo">NL</div>
     <div>
       <div class="header-title">Warehouse Intelligence</div>
-      <div class="header-subtitle">NL Stock & Shipment Analytics <span style="opacity:0.45;margin-left:6px">v1.9</span></div>
+      <div class="header-subtitle">NL Stock & Shipment Analytics <span style="opacity:0.45;margin-left:6px">v2.0</span></div>
     </div>
   </div>
   <div class="header-meta">
@@ -1533,6 +1533,15 @@ async function parseDailyReport(file) {
     return results;
   }
 
+  // Pre-scan: collect normalized names that have a (WORLD) variant row.
+  // For these, the (US) row is ignored entirely so only (WORLD) contributes
+  // to stock / back order / shipments. (US)-only parts are still counted.
+  const worldNorms = new Set();
+  for (let i = 5; i < data.length; i++) {
+    const m = data[i] && data[i][0];
+    if (m && /\(WORLD\)/i.test(String(m))) worldNorms.add(normalizeItemName(m));
+  }
+
   // Extract all item data
   const shipmentMap = {};
   const szStockMap = {};
@@ -1547,6 +1556,8 @@ async function parseDailyReport(file) {
     if (!model || String(model).trim() === '') continue;
     const normalizedModel = normalizeItemName(model);
     if (!normalizedModel) continue;
+    // Skip (US) rows when a (WORLD) counterpart exists — only (WORLD) counts.
+    if (/\(US\)/i.test(String(model)) && worldNorms.has(normalizedModel)) continue;
 
     const qtys = finalCols.map(ci => {
       const v = row[ci]; const n = Number(v);
