@@ -925,7 +925,7 @@
     <div class="header-logo">NL</div>
     <div>
       <div class="header-title">Warehouse Intelligence</div>
-      <div class="header-subtitle">NL Stock & Shipment Analytics <span style="opacity:0.45;margin-left:6px">v2.0</span></div>
+      <div class="header-subtitle">NL Stock & Shipment Analytics <span style="opacity:0.45;margin-left:6px">v2.1</span></div>
     </div>
   </div>
   <div class="header-meta">
@@ -1913,7 +1913,7 @@ function buildSZProdBalance(pn) {
   const production = getSZProduction(pn);
   const stock = getSZStock(pn);
   const backOrder = getSZBackOrder(pn);
-  let running = stock - backOrder;
+  let running = stock; // stock already accounts for reserves; do not subtract back order
   return dates.map((d, i) => {
     const qty = production[i] || 0;
     const future = d >= today;
@@ -1982,7 +1982,7 @@ function lookupItemSZ() {
     const stock = getSZStock(pn);
     const backOrder = getSZBackOrder(pn);
     const production = getSZProduction(pn);
-    const available = stock - backOrder;
+    const available = stock; // stock already accounts for reserves; do not subtract back order
     const hasProd = production.some(q => q > 0);
 
     const _szShipParts = [];
@@ -2029,7 +2029,7 @@ function renderLookupDetailSZ(pn) {
   const stock = getSZStock(pn);
   const backOrder = getSZBackOrder(pn);
   const production = getSZProduction(pn);
-  const available = stock - backOrder;
+  const available = stock; // stock already accounts for reserves; do not subtract back order
   const hasProd = production.some(q => q > 0);
   const balance = buildSZProdBalance(pn);
 
@@ -2093,7 +2093,7 @@ function addToSpecSZ(pn, qty) {
   } else {
     const stock = getSZStock(pn);
     const backOrder = getSZBackOrder(pn);
-    const available = stock - backOrder;
+    const available = stock; // stock already accounts for reserves; do not subtract back order
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const prodDates = (state.data.szProductionDates || []).map(d => new Date(d));
     const balance = buildSZProdBalance(pn);
@@ -2124,7 +2124,7 @@ function updateSpecPnSZ(idx, newPn) {
   const qty = specOrderSZ[idx].qty;
   const stock = getSZStock(newPn);
   const backOrder = getSZBackOrder(newPn);
-  const available = stock - backOrder;
+  const available = stock; // stock already accounts for reserves; do not subtract back order
   const today = new Date(); today.setHours(0,0,0,0);
   const prodDates = (state.data.szProductionDates || []).map(d => new Date(d));
   const balance = buildSZProdBalance(newPn);
@@ -2330,7 +2330,7 @@ function parseImportRowsSZ(rows) {
     const dates = (state.data.szProductionDates || []).map(d => new Date(d));
     const stock = getSZStock(row.pn);
     const backOrder = getSZBackOrder(row.pn);
-    row.available = stock - backOrder;
+    row.available = stock; // stock already accounts for reserves; do not subtract back order
     const futureShips = [];
     let prevNetAvail = row.available;
     balance.forEach((b, i) => {
